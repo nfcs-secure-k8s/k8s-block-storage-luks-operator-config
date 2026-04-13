@@ -55,7 +55,7 @@ The tasks described below focus on automating the lifecycle of encrypted block s
 
 1. CRD Controller: Watches `EncrytedVolume` custom resource.
 2. Vault Sync: The Operator kopf timer watches the vault secret version change every 30secs.
-3. Annotation Trigger: Operator patches the vaultVersion annotation when a new vaullt secret version is found.
+3. Annotation Trigger: Operator patches the vaultVersion annotation when a new vault secret version is found.
 4. Rekey Job: Annotation change triggers a priviledge job (but restricted using the Kubernetes AppAmor profile) that does the vault key rotation running `luksAddKey` and `luksRemoveKey` on the worker node.
 
 # Custom Resource
