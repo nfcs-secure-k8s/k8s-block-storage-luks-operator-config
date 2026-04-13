@@ -1,9 +1,0 @@
-apiVersion: crypto.example.com/v1
-kind: EncryptedVolume
-metadata:
-  name: luks-encrypted-volume-new
-  namespace: default
-spec:
-  pvcName: csi-pvc-cinder-for-luks
-  encryptionKeySecret: luks-key-secret
-  mountPath: /mnt/securefolder
