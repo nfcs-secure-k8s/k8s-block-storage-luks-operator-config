@@ -18,8 +18,6 @@ The tasks described below focus on automating the lifecycle of encrypted block s
 ├── Dockerfile
 ├── Dockerfile-storage-tool
 ├── README.md
-├── crd.yaml
-├── deployment.yaml
 ├── entrypoint.sh
 ├── luks-operator-vault
 │   ├── Chart.yaml
@@ -35,11 +33,9 @@ The tasks described below focus on automating the lifecycle of encrypted block s
 │   │   └── registry-secret.yaml
 │   └── values.yaml
 ├── main.py
-├── rbac.yaml
 ├── requirements.txt
-├── scripts
-│   └── k8s-luks-restricted.sh
-└── secure-volume-cr.yaml
+└── scripts
+    └── k8s-luks-restricted.sh
 ```
 
 # Features
