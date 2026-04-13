@@ -6,7 +6,7 @@ The tasks described below focus on automating the lifecycle of encrypted block s
 
 - Kubernetes cluster
 - CSI driver installed
-- StorageClass configured
+- Block StorageClass configured
 - Python 3.11 (development)
 - Docker
 - kubectl
