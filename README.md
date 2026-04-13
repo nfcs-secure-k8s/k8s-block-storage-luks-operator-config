@@ -10,6 +10,7 @@ The tasks described below focus on automating the lifecycle of encrypted block s
 - Python 3.11 (development)
 - Docker
 - kubectl
+- Helm
 
 # Project structure
 
