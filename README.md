@@ -20,26 +20,23 @@ The tasks described below focus on automating the lifecycle of encrypted block s
 ├── crd.yaml
 ├── deployment.yaml
 ├── entrypoint.sh
-├─
 ├── luks-operator-vault
-│ ├── Chart.yaml
-│ ├── charts
-│ ├── custom-resource
-│ │ └── encrypted-volume-cr-vault.yaml
-│ ├── templates
-│ │ ├── \_helpers.tpl
-│ │ ├── crds
-│ │ │ └── crd.yaml
-│ │ ├── deployment.yaml
-│ │ ├── rbac.yaml
-│ │ └── registry-secret.yaml
-│ └── values.yaml
-├── luks.key
+│   ├── Chart.yaml
+│   ├── charts
+│   ├── custom-resource
+│   │   └── encrypted-volume-cr-vault.yaml
+│   ├── templates
+│   │   ├── _helpers.tpl
+│   │   ├── crds
+│   │   │   └── crd.yaml
+│   │   ├── deployment.yaml
+│   │   ├── rbac.yaml
+│   │   └── registry-secret.yaml
+│   └── values.yaml
 ├── main.py
-├─
-├─
 ├── rbac.yaml
 ├── requirements.txt
+├── scripts
 └── secure-volume-cr.yaml
 ```
 
