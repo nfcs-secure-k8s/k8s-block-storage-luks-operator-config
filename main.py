@@ -421,7 +421,7 @@ def spawn_janitor_job(api, name, namespace, node_name):
                             echo "Killing processes holding $DEV_PATH..."
                             nsenter -t 1 -m -p -- fuser -mvk "$DEV_PATH" || true
                             
-                            # 2. Search for the ID in mountinfo (now without space errors)
+                            # 2. Search for the ID in mountinfo
                             TARGETS=$(nsenter -t 1 -m -p -- grep "$MAJMIN" /proc/self/mountinfo | awk '{{print $5}}' || true)
                             for mnt in $TARGETS; do
                                 echo "Force clearing mount: $mnt"

@@ -82,6 +82,10 @@ spec:
 Install, configure vault via helm chart and create vault policy and role.
 
 ```bash
+# Install AppAmor profile on the nodes
+chmod u+x  scripts/k8s-luks-restricted.sh
+./scripts/k8s-luks-restricted.sh
+
 # install vault
 helm install vault hashicorp/vault --set "server.dev.enabled=true"
 
