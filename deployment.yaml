@@ -1,0 +1,31 @@
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: encrypted-volume-operator-new
+  namespace: default
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: encrypted-volume-operator-new
+  template:
+    metadata:
+      labels:
+        app: encrypted-volume-operator-new
+    spec:
+      serviceAccountName: encrypted-volume-operator
+      imagePullSecrets:
+        - name: gitlab-regcred-cam
+      containers:
+        - name: operator
+          image: registry.gitlab.developers.cam.ac.uk/rcs/platforms/cloud-services/k8s-cinder-luks-operator-config:v2
+          imagePullPolicy: Always
+
+          env:
+            - name: KOPF_NAMESPACE
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.namespace
+            - name: PYTHONUNBUFFERED
+              value: "1"

@@ -1,0 +1,36 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "luks-operator-vault.fullname" . }}
+  labels:
+    {{- include "luks-operator-vault.labels" . | nindent 4 }}
+spec:
+  replicas: {{ .Values.operator.replicaCount }}
+  selector:
+    matchLabels:
+      {{- include "luks-operator-vault.selectorLabels" . | nindent 6 }}
+  template:
+    metadata:
+      labels:
+        {{- include "luks-operator-vault.selectorLabels" . | nindent 8 }}
+    spec:
+      serviceAccountName: "{{ include "luks-operator-vault.serviceAccountName" . }}"
+      imagePullSecrets:
+        - name: {{ (index .Values.imagePullSecrets 0).name | quote }}
+      containers:
+        - name: operator
+          image: "{{ .Values.image.repository }}:{{ .Values.image.tag }}"
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          env:
+            - name: KOPF_NAMESPACE
+              value: {{ .Values.operator.namespace }}
+            - name: VAULT_MOUNT
+              value: {{ .Values.vault.mountPath | quote }}
+            - name: VAULT_ROLE
+              value: {{ .Values.vault.role | quote }}
+            - name: VAULT_ADDR
+              value: {{ .Values.vault.address | quote }}
+            - name: PYTHONUNBUFFERED
+              value: "1"
+
+

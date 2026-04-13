@@ -1,0 +1,24 @@
+image:
+  repository: registry.gitlab.developers.cam.ac.uk/rcs/platforms/cloud-services/k8s-cinder-luks-operator-config
+  tag: luks-vault-v1
+  pullPolicy: Always
+
+operator:
+  namespace: "default"
+  replicaCount: 1
+
+serviceAccount:
+  create: true
+  name: encrypted-volume-operator
+imageCredentials:
+  enabled: true
+  dockerConfigJson: "" # to be provided at run time
+
+imagePullSecrets:
+  - name: gitlab-regcred-cam
+
+vault:
+  address: "http://vault.default.svc.cluster.local:8200"
+  role: "luks-operator-role"
+  mountPath: "secret"
+  kvPath: "luks-keys"

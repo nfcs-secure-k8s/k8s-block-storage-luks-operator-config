@@ -1,0 +1,46 @@
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: {{ include "luks-operator-vault.serviceAccountName" . }}
+  labels:
+    {{- include "luks-operator-vault.labels" . | nindent 4 }}
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: "{{ include "luks-operator-vault.fullname" . }}-role"
+rules:
+  - apiGroups: [""]
+    resources: ["pods", "pods/log", "pods/exec", "persistentvolumeclaims", "secrets", "events", "namespaces"]
+    verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
+
+  - apiGroups: ["crypto.example.com"]
+    resources: 
+      - "encryptedvolumes"
+      - "encryptedvolumes/status"
+    verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
+  - apiGroups: ["apiextensions.k8s.io"]
+    resources: ["customresourcedefinitions"]
+    verbs: ["get", "list", "watch"]
+  - apiGroups: [""]
+    resources: ["events"]
+    verbs: ["create", "patch", "update"]
+  - apiGroups: ["batch"]
+    resources: ["jobs"]
+    verbs: ["get", "list", "watch", "create", "delete"]
+  - apiGroups: ["storage.k8s.io"]
+    resources: ["storageclasses"]
+    verbs: ["get", "list", "watch"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: "{{ include "luks-operator-vault.fullname" . }}-binding"
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: "{{ include "luks-operator-vault.fullname" . }}-role"
+subjects:
+  - kind: ServiceAccount
+    name: "{{ include "luks-operator-vault.serviceAccountName" . }}"
+    namespace: {{ .Release.Namespace }}

@@ -1,0 +1,7 @@
+FROM alpine:3.19
+RUN apk add --no-cache \
+    cryptsetup \
+    util-linux \
+    psmisc \
+    e2fsprogs \
+    bash

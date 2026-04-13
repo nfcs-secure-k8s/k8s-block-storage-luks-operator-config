@@ -1,0 +1,13 @@
+apiVersion: crypto.example.com/v1
+kind: EncryptedVolume
+metadata:
+  name: luks-encrypted-volume-new
+  namespace: default
+spec:
+  institution: "university-of-cambridge"
+  pvcName: "csi-pvc-cinder-for-luks"
+  mountPath: "/mnt/securefolder"
+  size: "2Gi"
+  deletionPolicy: "Delete"
+  # deletionPolicy: "Retain"
+  storageClassName: "cinder-sc" # change this if storageclass name is different

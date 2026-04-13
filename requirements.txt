@@ -1,0 +1,3 @@
+kopf==1.36
+kubernetes
+hvac
