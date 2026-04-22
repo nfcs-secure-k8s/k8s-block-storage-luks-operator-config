@@ -34,8 +34,10 @@ The tasks described below focus on automating the lifecycle of encrypted block s
 │   └── values.yaml
 ├── main.py
 ├── requirements.txt
-└── scripts
-    └── k8s-luks-restricted.sh
+├── scripts
+│   └── k8s-luks-restricted.sh
+└── vault-values
+    └── values.yaml
 ```
 
 # Features
