@@ -74,8 +74,6 @@ spec:
 
 1. Vault Configuration
 
-#### Note: This vault version runs locally. An OIDC enabled vault in progress.
-
 ## Step 1
 
 Install, configure vault via helm chart and create vault policy and role.
