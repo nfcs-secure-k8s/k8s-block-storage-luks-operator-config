@@ -151,7 +151,7 @@ EOF
 
 ## Step 2
 
-Install Kubernetes Operator
+### Install Kubernetes Operator
 
 ```bash
 # Create and extract secret
@@ -173,7 +173,7 @@ kubectl apply -f ~/projects/k8s-cinder-luks-operator-config/luks-operator-vault/
 
 ## Verification
 
-Verify encryption on a worker node;
+### Verify encryption on a worker node
 
 ```bash
 #find the device
@@ -217,7 +217,7 @@ sudo cryptsetup luksDump /dev/sdb
 
 ## Step 3
 
-Access Vault UI
+### Access Vault UI
 
 Access to the Vault UI can either be via the dev mode or OIDC
 
@@ -245,7 +245,7 @@ To be able to initialise, format and rekey the underlying block storage, the hel
 
 # Future Improvements
 
-Use CSI-based encryption.
+### Use CSI-based encryption.
 
 # Useful Links
 
