@@ -221,7 +221,7 @@ sudo cryptsetup luksDump /dev/sdb
 
 Access to the Vault UI can either be via the dev mode or OIDC
 
-Login to vault OIDC `https://DOMAIN-NAME/ui/vault/auth` using either Google or MyAccessID (Institution credentials).
+Login to vault OIDC `https://<DOMAIN-NAME>/ui/vault/auth` using either Google or MyAccessID (Institution credentials).
 
 To login with OIDC, change method to `OIDC` and role to e.g. `researcher-role` or depending on the name oF the role that is set.
 
