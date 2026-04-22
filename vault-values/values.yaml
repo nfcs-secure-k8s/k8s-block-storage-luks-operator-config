@@ -1,0 +1,35 @@
+server:
+  ha:
+    enabled: true
+    apiAddr: "https://<DOMAIN-NAME.CO.UK>" # change this
+    raft:
+      enabled: true
+      setNodeId: true
+      config: |
+        ui = true
+        listener "tcp" {
+          address = "[::]:8200"
+          cluster_address = "[::]:8201"
+          tls_disable = 1 # Nginx or Traefik handles the SSL
+        }
+        storage "raft" {
+          path = "/vault/data"
+        }
+
+  dataStorage:
+    enabled: true
+    size: 10Gi # change this
+    storageClass: "cinder-sc" # change this
+
+  ingress:
+    enabled: true
+    ingressClassName: nginx
+    activeService: false
+    annotations:
+      cert-manager.io/cluster-issuer: "letsencrypt-staging" # change this
+      nginx.ingress.kubernetes.io/backend-protocol: "HTTP"
+    hosts:
+      - host: <DOMAIN-NAME.CO.UK> # change this
+    tls:
+      - secretName: sslip-tls-secret # change this
+        hosts: [<DOMAIN-NAME.CO.UK>] # change this
