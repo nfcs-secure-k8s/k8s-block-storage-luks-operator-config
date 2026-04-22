@@ -151,7 +151,7 @@ EOF
 
 ## Step 2
 
-### Install Kubernetes Operator
+2. Install Kubernetes Operator
 
 ```bash
 # Create and extract secret
@@ -173,7 +173,7 @@ kubectl apply -f ~/projects/k8s-cinder-luks-operator-config/luks-operator-vault/
 
 ## Verification
 
-### Verify encryption on a worker node
+#### Verify encryption on a worker node
 
 ```bash
 #find the device
@@ -217,7 +217,7 @@ sudo cryptsetup luksDump /dev/sdb
 
 ## Step 3
 
-### Access Vault UI
+3. Access Vault UI
 
 Access to the Vault UI can either be via the dev mode or OIDC
 
