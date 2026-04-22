@@ -136,7 +136,6 @@ path "sys/internal/ui/mounts/secret" {
   capabilities = ["read"]
 }
 
-# 5. IDENTITY PERMISSIONS (Already good, but keep these)
 path "identity/entity/id/{{identity.entity.id}}" {
   capabilities = ["read"]
 }
