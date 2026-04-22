@@ -224,7 +224,9 @@ Access Vault UI
 Access to the Vault UI can either be via the dev mode or OIDC
 Login to vault OIDC https://<DOMAIN-NAME>/ui/vault/auth using either Google or MyAccessID (Institution credentials). To login with OIDC, change method to `OIDC` and role to e.g. `researcher-role` or depending on the name or the role that is set. To login to the DEV mode use same URL and change method to `Token` and use the `root token` generated above.
 
-![vault-home] (https://github.com/nfcs-secure-k8s/k8s-block-storage-luks-operator-config/blob/main/images/vault1-home.png?raw=true)
+![vault-home](https://github.com/nfcs-secure-k8s/k8s-block-storage-luks-operator-config/blob/main/images/vault1-home.png?raw=true)
+
+<!-- ![vault-home](images/vault1-home.png) -->
 
 # Security Considerations
 
