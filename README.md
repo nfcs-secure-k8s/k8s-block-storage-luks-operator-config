@@ -41,8 +41,7 @@ The tasks described below focus on automating the lifecycle of encrypted block s
 # Features
 
 - Automated LUKS Provisioning: Automatically encrypts PVC volumes with LUKS
-- Vault Key Management: Integrates with HashiCorp vault using KV-V2 for encryption key storage and rotation.
-
+- Vault Key Management: Integrates with HashiCorp vault using KV-V2 engine for encryption key storage and rotation.
 - Key Rotation: Operator monitors vault key version changes using a background timer, which is triggered on version change for rekeying.
 - Federated Identity: Configured myAccessID for federated access using institutions's id to manage encrypted volume keys. (Not yet implemented)
 - Ephemeral Rekeying: Uses short-lived jobs with restricted AppAmor profiles to perform key rotations.
@@ -86,10 +85,21 @@ Install, configure vault via helm chart and create vault policy and role.
 chmod u+x  scripts/k8s-luks-restricted.sh
 ./scripts/k8s-luks-restricted.sh
 
-# install vault
-helm install vault hashicorp/vault --set "server.dev.enabled=true"
 
-kubectl port-forward vault-0 8200:8200
+# Vault Setup - Install vault HA
+helm install vault hashicorp/vault -f vault-values/values.yaml
+
+# Initialize to prepare vault storage to receive data. Save the 5 Unseal keys and initial root token in a secure location
+kubectl exec vault-0 -- vault operator init
+
+#Unseal the leader (vault-0) with the unseal command 3 times using different keys. Do same for vault-1 and vault-2
+kubectl exec -it vault-0 -- vault operator unseal
+
+# Join the new nodes as peers to the raft cluster
+kubectl exec vault-1 -- vault operator raft join http://vault-0.vault-internal:8200
+
+# Login with the root token provided to setup auth methods
+kubectl exec -it vault-0 -- vault login <root token>
 
 #enable vault to trust Kubernetes
 kubectl exec vault-0 -- vault auth enable kubernetes
@@ -98,31 +108,50 @@ kubectl exec vault-0 -- vault auth enable kubernetes
 kubectl exec vault-0 -- sh -c 'vault write auth/kubernetes/config \
     kubernetes_host="https://$KUBERNETES_SERVICE_HOST:$KUBERNETES_SERVICE_PORT"'
 
+kubectl exec vault-0 -- vault write auth/kubernetes/role/luks-operator-role \
+    bound_service_account_names="encrypted-volume-operator" \
+    bound_service_account_namespaces="default" \
+    policies="luks-policy" \
+    ttl="24h"
+
 # policy and role
 kubectl exec -i vault-0 -- vault policy write luks-policy - <<EOF
 path "secret/data/tenants/*" {
   capabilities = ["create", "read", "update", "delete", "list"]
 }
+
 path "secret/metadata/tenants/*" {
-  capabilities = ["read", "list"]
+  capabilities = ["read", "list", "delete"]
+}
+
+path "secret/metadata/tenants" {
+  capabilities = ["list"]
+}
+
+path "secret/metadata" {
+  capabilities = ["list"]
+}
+
+path "sys/internal/ui/mounts/secret" {
+  capabilities = ["read"]
+}
+
+# 5. IDENTITY PERMISSIONS (Already good, but keep these)
+path "identity/entity/id/{{identity.entity.id}}" {
+  capabilities = ["read"]
+}
+
+path "identity/entity/name/{{identity.entity.name}}" {
+  capabilities = ["read"]
+}
+
+path "identity/entity/id" {
+  capabilities = ["list"]
 }
 EOF
-
-# Kubernetes auth role
-kubectl exec vault-0 -- vault write auth/kubernetes/role/luks-operator-role \
-    bound_service_account_names=encrypted-volume-operator \
-    bound_service_account_namespaces=default \
-    policies=luks-policy \
-    ttl=24h
-
 ```
 
 ## Step 2
-
-Access Vault UI
-Login to vault http://localhost:8200/ui/vault/auth, use the default token `root`.
-
-## Step 3
 
 Install Kubernetes Operator
 
@@ -188,6 +217,13 @@ Command failed with code -2 (no permission or bad passphrase).
 sudo cryptsetup luksDump /dev/sdb
 ```
 
+## Step 2
+
+Access Vault UI
+
+Access to the Vault UI can either be via the dev mode or OIDC
+Login to vault OIDC https://<DOMAIN-NAME>/ui/vault/auth using either Google or MyAccessID (Institution credentials). To login with OIDC, change method to `OIDC` and role to e.g. `researcher-role` or depending on the name or the role that is set. To login to the DEV mode use same URL and change method to `Token` and use the `root token` generated above.
+
 # Security Considerations
 
 To be able to initialise, format and rekey the underlying block storage, the helper pods (Init-Containers, Rekey jobs) need their privilege access set to `true`. To mitigate this risk associated with escalated privilege, the following are implemented.
@@ -211,3 +247,4 @@ Use CSI-based encryption.
 - https://python-hvac.org/en/stable/usage/secrets_engines/kv_v2.html
 - https://developer.hashicorp.com/vault/docs/deploy/kubernetes/injector
 - https://developer.hashicorp.com/vault/docs/agent-and-proxy/agent/template
+- https://developer.hashicorp.com/vault/docs/secrets/identity/oidc-provider
