@@ -2,10 +2,11 @@
 CSI Node service — LUKS setup, staging, and mounting.
 
 Flow:
-  NodeStageVolume   → luksFormat (idempotent) → luksOpen → mount at staging path
-  NodePublishVolume → bind-mount staging path  → pod target path
+  NodeStageVolume   → fetch key from Vault (auto-rotate if version changed)
+                    → luksFormat (idempotent) → luksOpen → mount at staging path
+  NodePublishVolume → bind-mount staging path → pod target path
   NodeUnpublishVolume → umount target path
-  NodeUnstageVolume   → luksClose
+  NodeUnstageVolume   → umount (with lazy fallback) → luks_close_robust
 """
 
 import logging
@@ -17,16 +18,13 @@ import grpc
 
 from generated import csi_pb2, csi_pb2_grpc
 import luks
+import vault as vault_mod
 
 LOG = logging.getLogger(__name__)
-
-# Key inside the CSI secrets map that holds the LUKS passphrase.
-LUKS_KEY_FIELD = "luksKey"
 
 
 def _mapper_name(volume_id: str) -> str:
     """Deterministic dm-crypt mapper name derived from volume ID."""
-    # Truncate the full prefixed string to 63 chars (device-mapper limit)
     return ("luks-" + volume_id.replace("/", "-"))[:63]
 
 
@@ -39,9 +37,7 @@ def _mount(source: str, target: str, fs_type: str = "", flags: list[str] | None 
     cmd += [source, target]
     result = subprocess.run(cmd, capture_output=True)
     if result.returncode != 0:
-        raise RuntimeError(
-            f"mount failed: {result.stderr.decode().strip()}"
-        )
+        raise RuntimeError(f"mount failed: {result.stderr.decode().strip()}")
 
 
 def _is_mounted(path: str) -> bool:
@@ -55,21 +51,69 @@ def _umount(path: str) -> None:
         raise RuntimeError(f"umount failed: {result.stderr.decode().strip()}")
 
 
+def _umount_lazy(path: str) -> None:
+    """Force lazy unmount — mirrors the janitor job's `umount -fl` fallback."""
+    LOG.warning("Falling back to lazy unmount for %s", path)
+    result = subprocess.run(["umount", "-fl", path], capture_output=True)
+    if result.returncode != 0:
+        raise RuntimeError(f"umount -fl failed: {result.stderr.decode().strip()}")
+
+
+def _open_with_rotation(device: str, mapper: str, institution: str, volume_name: str) -> None:
+    """
+    Open the LUKS device, performing key rotation if the Vault version has advanced.
+
+    Rotation sequence (mirrors the upstream rekey Job):
+      1. Fetch current key (latest Vault version).
+      2. Try to open — succeeds if the device already uses the current key.
+      3. On wrong-key failure, fetch the previous Vault version and perform
+         luksAddKey (add new) + luksRemoveKey (evict old), then open.
+    """
+    ver = vault_mod.current_version(institution, volume_name)
+    current_key = vault_mod.read_secret(institution, volume_name).encode()
+
+    if not luks.mapper_exists(mapper):
+        try:
+            luks.luks_open(device, mapper, current_key)
+            return
+        except RuntimeError as exc:
+            # "No key available" means the device was formatted with an older key.
+            if "No key available" not in str(exc) or ver < 2:
+                raise
+            LOG.info(
+                "Current Vault key (v%d) rejected; attempting rotation for %s",
+                ver, device,
+            )
+            prev_key = vault_mod.read_secret(institution, volume_name, version=ver - 1).encode()
+            luks.luks_add_key(device, current_key, prev_key)
+            luks.luks_remove_key(device, prev_key)
+            LOG.info("Key rotation to Vault v%d complete for %s", ver, device)
+            luks.luks_open(device, mapper, current_key)
+    else:
+        LOG.info("Mapper %s already open, skipping open", mapper)
+
+
 class NodeServicer(csi_pb2_grpc.NodeServicer):
 
     def NodeStageVolume(self, request, context):
         """
         Format + open the LUKS device and mount it at the staging path.
 
-        Expected volume_context keys:
-          backingDevice  – block device path (e.g. /dev/loop0, /dev/vdb)
-          luksType       – luks1 or luks2 (default: luks2)
-          filesystem     – ext4 or xfs   (default: ext4)
+        Key is fetched directly from Vault using volume_context fields:
+          institution  — tenant name (default: "default")
+          vaultPath    — full Vault path (used to derive volume_name for logging)
+
+        Automatic key rotation occurs if the Vault version has advanced since
+        the device was last formatted/opened.
+
+        Other volume_context keys:
+          backingDevice  — block device path (e.g. /dev/loop0, /dev/vdb)
+          luksType       — luks1 or luks2 (default: luks2)
+          filesystem     — ext4 or xfs   (default: ext4)
         """
         volume_id = request.volume_id
         staging_path = request.staging_target_path
         ctx = request.volume_context
-        secrets = request.secrets
 
         if not volume_id:
             context.set_code(grpc.StatusCode.INVALID_ARGUMENT)
@@ -82,37 +126,32 @@ class NodeServicer(csi_pb2_grpc.NodeServicer):
             context.set_details("volume_context.backingDevice is required")
             return csi_pb2.NodeStageVolumeResponse()
 
-        luks_key_str = secrets.get(LUKS_KEY_FIELD)
-        if not luks_key_str:
-            context.set_code(grpc.StatusCode.INVALID_ARGUMENT)
-            context.set_details(f"secrets.{LUKS_KEY_FIELD} is required")
-            return csi_pb2.NodeStageVolumeResponse()
+        institution = ctx.get("institution", "default")
+        vault_path = ctx.get("vaultPath", "")
+        # volume_name is the last segment of the Vault path
+        volume_name = vault_path.rsplit("/", 1)[-1] if vault_path else volume_id.replace("/", "-")
 
-        luks_key = luks_key_str.encode() if isinstance(luks_key_str, str) else luks_key_str
         luks_type = ctx.get("luksType", "luks2")
         filesystem = ctx.get("filesystem", "ext4")
         mapper = _mapper_name(volume_id)
 
         LOG.info(
-            "NodeStageVolume: volume=%s device=%s mapper=%s staging=%s",
-            volume_id, device, mapper, staging_path,
+            "NodeStageVolume: volume=%s device=%s mapper=%s staging=%s vault=%s",
+            volume_id, device, mapper, staging_path, vault_path,
         )
 
         try:
-            # 1. Format the device if it doesn't already have a LUKS header
+            current_key = vault_mod.read_secret(institution, volume_name).encode()
+
             if not luks.is_luks(device):
                 LOG.info("Device %s is not LUKS-formatted; formatting now", device)
-                luks.luks_format(device, luks_key, luks_type)
-                luks.luks_open(device, mapper, luks_key)
+                luks.luks_format(device, current_key, luks_type)
+                luks.luks_open(device, mapper, current_key)
                 luks.make_filesystem(mapper, filesystem)
-                # Leave the mapper open — luks_open below is idempotent
             else:
-                LOG.info("Device %s already LUKS-formatted", device)
+                LOG.info("Device %s already LUKS-formatted; opening with rotation check", device)
+                _open_with_rotation(device, mapper, institution, volume_name)
 
-            # 2. Open the LUKS device (no-op if already open from format branch)
-            luks.luks_open(device, mapper, luks_key)
-
-            # 3. Mount the decrypted device at the staging path
             os.makedirs(staging_path, exist_ok=True)
             if _is_mounted(staging_path):
                 LOG.info("Staging path %s already mounted", staging_path)
@@ -129,7 +168,7 @@ class NodeServicer(csi_pb2_grpc.NodeServicer):
         return csi_pb2.NodeStageVolumeResponse()
 
     def NodeUnstageVolume(self, request, context):
-        """Unmount staging path and close the LUKS mapper."""
+        """Unmount staging path (with lazy fallback) and close the LUKS mapper robustly."""
         volume_id = request.volume_id
         staging_path = request.staging_target_path
         mapper = _mapper_name(volume_id)
@@ -138,8 +177,11 @@ class NodeServicer(csi_pb2_grpc.NodeServicer):
 
         try:
             if _is_mounted(staging_path):
-                _umount(staging_path)
-            luks.luks_close(mapper)
+                try:
+                    _umount(staging_path)
+                except RuntimeError:
+                    _umount_lazy(staging_path)
+            luks.luks_close_robust(mapper)
         except Exception as e:
             LOG.exception("NodeUnstageVolume failed")
             context.set_code(grpc.StatusCode.INTERNAL)
@@ -167,7 +209,6 @@ class NodeServicer(csi_pb2_grpc.NodeServicer):
             else:
                 _mount(staging_path, target_path, flags=["--bind"])
                 if readonly:
-                    # A bind mount inherits rw; a separate remount is required to make it ro.
                     _mount(target_path, target_path, flags=["-o", "remount,ro,bind"])
                     LOG.info("Bind-mounted %s → %s (read-only)", staging_path, target_path)
                 else:

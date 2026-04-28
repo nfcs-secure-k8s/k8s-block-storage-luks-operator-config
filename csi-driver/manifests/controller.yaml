@@ -24,6 +24,10 @@ spec:
               value: /csi/csi.sock
             - name: CSI_MODE
               value: controller
+            - name: VAULT_ADDR
+              value: "http://vault.default.svc.cluster.local:8200"
+            - name: VAULT_ROLE
+              value: "luks-operator-role"
           volumeMounts:
             - name: socket-dir
               mountPath: /csi

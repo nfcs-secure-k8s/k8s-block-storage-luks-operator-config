@@ -16,11 +16,11 @@ parameters:
   luksType: luks2
   filesystem: ext4
 
-  # CSI secret references — Kubernetes resolves these per-PVC and passes
-  # the Secret's contents to NodeStageVolume as the 'secrets' map.
-  # The Secret must have a key named 'luksKey' containing the passphrase.
-  #
-  # Naming convention: create a Secret named <pvc-name>-luks-key in the
-  # same namespace as the PVC before creating the PVC.
-  csi.storage.k8s.io/node-stage-secret-name: "${pvc.name}-luks-key"
-  csi.storage.k8s.io/node-stage-secret-namespace: "${pvc.namespace}"
+  # Tenant/institution identifier used to namespace LUKS keys in Vault.
+  # Keys are stored at: secret/tenants/<institution>/luks-keys/<volume-name>
+  institution: "default"
+
+  # What to do when the PVC (and thus volume) is deleted:
+  #   Delete — destroy the Vault key (all versions) and the backing PVC.
+  #   Retain — keep the Vault key and backing PVC for manual recovery.
+  deletionPolicy: "Delete"

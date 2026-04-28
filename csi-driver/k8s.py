@@ -143,6 +143,43 @@ def emit_event(
 
 
 # ---------------------------------------------------------------------------
+# PV helpers
+# ---------------------------------------------------------------------------
+
+def get_pv_volume_attributes_by_pvc(pvc_name: str, namespace: str) -> dict:
+    """Return the CSI volumeAttributes stored on the PV bound to pvc_name.
+
+    Used by DeleteVolume to read institution, vaultPath, and deletionPolicy
+    that were written into volume_context at CreateVolume time.
+    Returns an empty dict if the PVC or PV is not found or has no CSI attributes.
+    """
+    api = core()
+    try:
+        pvc = api.read_namespaced_persistent_volume_claim(pvc_name, namespace)
+    except client.exceptions.ApiException as e:
+        if e.status == 404:
+            LOG.debug("PVC %s/%s not found when reading PV attributes", namespace, pvc_name)
+            return {}
+        raise
+
+    pv_name = pvc.spec.volume_name
+    if not pv_name:
+        return {}
+
+    try:
+        pv = api.read_persistent_volume(pv_name)
+    except client.exceptions.ApiException as e:
+        if e.status == 404:
+            return {}
+        raise
+
+    csi_spec = getattr(pv.spec, "csi", None)
+    if csi_spec and csi_spec.volume_attributes:
+        return dict(csi_spec.volume_attributes)
+    return {}
+
+
+# ---------------------------------------------------------------------------
 # Secret helpers
 # ---------------------------------------------------------------------------
 

@@ -11,6 +11,10 @@ spec:
     metadata:
       labels:
         app: luks-csi-node
+      annotations:
+        # AppArmor restricts the privileged container to LUKS/mount operations only.
+        # The profile must be loaded on each node first (see manifests/apparmor-profile.yaml).
+        container.apparmor.security.beta.kubernetes.io/luks-csi: localhost/k8s-luks-restricted
     spec:
       serviceAccountName: luks-csi-node
       containers:
@@ -25,6 +29,14 @@ spec:
               value: /csi/csi.sock
             - name: CSI_MODE
               value: node
+            # Disable udev synchronisation in cryptsetup to prevent hangs in
+            # container environments where udev is not running.
+            - name: CRYPTSETUP_UDEV_SYNC_DISABLE
+              value: "1"
+            - name: VAULT_ADDR
+              value: "http://vault.default.svc.cluster.local:8200"
+            - name: VAULT_ROLE
+              value: "luks-operator-role"
           volumeMounts:
             - name: plugin-dir
               mountPath: /csi
