@@ -34,9 +34,12 @@ User PVC (storageClassName: luks-encrypted)
   └── NodeUnstageVolume:  cryptsetup luksClose
 ```
 
-The LUKS passphrase is never generated or stored by the driver. Users create a
-Kubernetes Secret named `<pvc-name>-luks-key` before provisioning. The CSI secret
-mechanism passes its contents to `NodeStageVolume` at mount time.
+When a PVC is created, the Controller plugin auto-generates a cryptographically secure
+LUKS key in HashiCorp Vault at `secret/tenants/{institution}/luks-keys/{volume-name}`
+(idempotent — no-op if the key already exists). At mount time, the Node plugin fetches
+the key directly from Vault using the pod's Kubernetes service account JWT. Users do not
+create or manage key material. The only prerequisite is a running Vault instance with the
+Kubernetes auth method configured — see [Vault prerequisites](#vault-prerequisites) below.
 
 ---
 
@@ -88,10 +91,100 @@ csi-driver/
   (`registry.k8s.io/sig-storage/csi-provisioner:v5.1.0` and
   `registry.k8s.io/sig-storage/csi-node-driver-registrar:v2.12.0`)
 
+**HashiCorp Vault (required):**
+
+- Vault 1.12+ with the KV v2 secrets engine enabled at the `secret/` mount
+- Kubernetes auth method enabled and configured against your cluster
+- A Vault role bound to the `luks-csi-controller` and `luks-csi-node` service accounts
+  in the `kube-system` namespace (role name configurable via `luks-csi-driver/values.yaml`)
+- A Vault policy granting `create/read/update/delete/list` on `secret/data/tenants/*`
+  and `secret/metadata/tenants/*`
+
+See [Vault prerequisites](#vault-prerequisites) for the exact setup commands.
+
 **For local development with Lima + k3s (macOS):**
 
 - [Lima](https://lima-vm.io/) 2.0+ — `brew install lima`
 - A running k3s Lima VM (see [Local development with Lima](#local-development-with-lima) below)
+
+---
+
+## Vault prerequisites
+
+The CSI driver uses HashiCorp Vault as the LUKS key backend. The controller
+auto-generates keys at provisioning time and the node fetches them at mount time — both
+authenticate via the pod's Kubernetes service account JWT.
+
+### 1. Install and unseal Vault
+
+Follow the Vault HA setup steps in the [root README](../README.md#installation--setup)
+(helm install, operator init, unseal, raft join). Those steps are shared between the
+operator and CSI driver.
+
+### 2. Enable KV v2
+
+```bash
+kubectl exec vault-0 -- vault secrets enable -path=secret kv-v2
+```
+
+Skip this if KV v2 is already enabled (you'll get an error if it's already mounted).
+
+### 3. Create the CSI driver Vault role
+
+The CSI driver uses **two** service accounts (`luks-csi-controller` and `luks-csi-node`
+in the `kube-system` namespace), both of which must be included in the role. This is
+different from the kopf operator, which uses `encrypted-volume-operator` in `default`.
+
+```bash
+kubectl exec vault-0 -- vault write auth/kubernetes/role/luks-operator-role \
+    bound_service_account_names="luks-csi-controller,luks-csi-node" \
+    bound_service_account_namespaces="kube-system" \
+    policies="luks-policy" \
+    ttl="24h"
+```
+
+The role name (`luks-operator-role`) matches the default in `luks-csi-driver/values.yaml`.
+Change both if you use a different name.
+
+### 4. Create the Vault policy
+
+The policy path is identical to the kopf operator — LUKS keys are stored at
+`secret/tenants/{institution}/luks-keys/{volume-name}` in both implementations.
+
+```bash
+kubectl exec -i vault-0 -- vault policy write luks-policy - <<EOF
+path "secret/data/tenants/*" {
+  capabilities = ["create", "read", "update", "delete", "list"]
+}
+
+path "secret/metadata/tenants/*" {
+  capabilities = ["read", "list", "delete"]
+}
+
+path "secret/metadata/tenants" {
+  capabilities = ["list"]
+}
+
+path "secret/metadata" {
+  capabilities = ["list"]
+}
+
+path "sys/internal/ui/mounts/secret" {
+  capabilities = ["read"]
+}
+EOF
+```
+
+### 5. Verify after deployment
+
+Once the CSI driver is deployed and a PVC is created, confirm the key was provisioned:
+
+```bash
+kubectl describe pvc <your-pvc-name>
+# Look for an event like:
+# Normal  LuksKeyProvisioned  ...  LUKS key auto-generated in Vault at
+#   "secret/tenants/default/luks-keys/<volume-id>" (v1)
+```
 
 ---
 
@@ -128,13 +221,39 @@ docker tag luks-csi:dev <your-registry>/luks-csi:dev
 docker push <your-registry>/luks-csi:dev
 ```
 
-Update `image:` in `manifests/controller.yaml` and `manifests/node.yaml` to match,
-and set `imagePullPolicy: IfNotPresent` (or `Always`).
-
 ### 2. Set up a backing StorageClass
 
-Edit `manifests/storageclass.yaml` and set `backingStorageClass` to a StorageClass
-in your cluster that provisions raw block volumes:
+Identify a StorageClass in your cluster that provisions raw block volumes (e.g.
+`csi-cinder-sc-retain`, `rbd-sc`, `ebs-sc`). You'll pass this as
+`storageClass.backingStorageClass` in the Helm install below.
+
+### 3. Deploy the CSI driver
+
+**Via Helm (recommended):**
+
+```bash
+helm install luks-csi-driver ./luks-csi-driver/ \
+  --namespace kube-system \
+  --set vault.address="http://vault.default.svc.cluster.local:8200" \
+  --set vault.role="luks-operator-role" \
+  --set storageClass.backingStorageClass="<your-block-storageclass>" \
+  --set storageClass.institution="<your-institution>"
+```
+
+Key values to customise (all in `luks-csi-driver/values.yaml`):
+
+| Value | Default | Description |
+|---|---|---|
+| `vault.address` | `http://vault.default.svc.cluster.local:8200` | Vault API URL reachable from the cluster |
+| `vault.role` | `luks-operator-role` | Vault Kubernetes auth role (must match Vault prerequisites) |
+| `storageClass.backingStorageClass` | `local-path` | Underlying raw block StorageClass |
+| `storageClass.institution` | `default` | Namespaces LUKS keys in Vault per tenant |
+| `storageClass.deletionPolicy` | `Delete` | `Delete` destroys the Vault key on PVC deletion; `Retain` keeps it |
+| `image.repository` / `image.tag` | `luks-csi:dev` | Your built image |
+
+**Via raw manifests (alternative):**
+
+Edit `manifests/storageclass.yaml` and set `backingStorageClass`:
 
 ```yaml
 parameters:
@@ -143,7 +262,7 @@ parameters:
   filesystem: ext4
 ```
 
-### 3. Deploy the CSI driver
+Then deploy:
 
 ```bash
 kubectl apply -f csi-driver/manifests/csidriver.yaml \
@@ -162,15 +281,8 @@ kubectl rollout status daemonset/luks-csi-node -n kube-system
 
 ### 4. Provision an encrypted volume
 
-Create the key Secret **before** the PVC (naming convention: `<pvc-name>-luks-key`):
-
-```bash
-kubectl create secret generic my-pvc-luks-key \
-  --from-literal=luksKey=<your-passphrase> \
-  --namespace=default
-```
-
-Create the PVC:
+No key Secret is needed — the controller auto-generates the LUKS key in Vault at
+provisioning time. Simply create the PVC:
 
 ```yaml
 apiVersion: v1
@@ -186,8 +298,14 @@ spec:
       storage: 10Gi
 ```
 
-The key ownership stays entirely with the user. The driver reads the Secret at mount
-time and never logs or persists the passphrase.
+Confirm the Vault key was auto-provisioned:
+
+```bash
+kubectl describe pvc my-pvc
+# Look for:
+# Normal  LuksKeyProvisioned  ...  LUKS key auto-generated in Vault at
+#   "secret/tenants/default/luks-keys/<volume-id>" (v1)
+```
 
 ---
 
@@ -344,7 +462,12 @@ The original implementation (`main.py` at the project root) uses the
 | Aspect | kopf Operator | CSI Driver |
 |---|---|---|
 | **User interface** | Custom Resource (`EncryptedVolume`) | Standard PVC (`storageClassName: luks-encrypted`) |
-| **Key management** | Secret path hard-coded in operator | User creates `<pvc-name>-luks-key`; driver reads it at mount time via CSI secret mechanism |
+| **Key generation** | Auto-generated in Vault at CR creation (`main.py`) | Auto-generated in Vault at `CreateVolume` (`controller.py` via `vault.py`) |
+| **Key storage path** | `secret/tenants/{institution}/luks-keys/{name}` | Same path |
+| **Key fetch at mount** | Vault Agent sidecar injects key into pod via annotations | `node.py` calls `vault.py::read_secret()` directly using service account JWT |
+| **Key rotation trigger** | 30s timer detects Vault version bump → patches `vaultVersion` annotation | 30s sync thread annotates PV; rotation auto-applied in `NodeStageVolume` |
+| **Rotation mechanism** | Privileged rekey Job: `luksAddKey` + `luksRemoveKey` | `_open_with_rotation()` in `node.py`: `luksAddKey` + `luksRemoveKey` |
+| **AppArmor deployment** | SSH script (`scripts/k8s-luks-restricted.sh`) run on each worker | Loader DaemonSet (`apparmor-profile.yaml`) — automatic, no SSH required |
 | **Device path** | Hard-coded `/dev/vdc` in pod shell script | Derived from the backing PV's spec; passed via VolumeContext |
 | **Encryption setup** | init container inside every workload pod (installs cryptsetup at runtime) | Node plugin runs once per volume on the node; no changes to user pods |
 | **Privileged pods** | Every user workload pod needs `privileged: true` | Only the node DaemonSet is privileged; user pods are unprivileged |
@@ -362,7 +485,9 @@ The original implementation (`main.py` at the project root) uses the
 
 2. **Privileged workload pods** — Every pod that needs an encrypted volume must run
    with `privileged: true`. This widens the blast radius of any container escape and
-   is typically blocked by Pod Security Admission in production clusters.
+   is typically blocked by Pod Security Admission in production clusters. The CSI
+   driver confines privilege to only the node DaemonSet; user workload pods remain
+   unprivileged.
 
 3. **No unmount lifecycle** — There is no `@kopf.on.delete` handler. When the
    `EncryptedVolume` CR or pod is deleted, the LUKS mapper stays open on the node

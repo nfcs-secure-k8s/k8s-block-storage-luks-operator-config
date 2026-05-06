@@ -2,6 +2,8 @@
 
 The tasks described below focus on automating the lifecycle of encrypted block storage. It uses a Kubernetes-native operator built with Python Kopf and HashiCorp Vault. It provides on-the-fly LUKS formatting, secure key management, multi-tenant isolation and zero-downtime key rotation.
 
+A CSI driver implementation is now available in the `csi-driver/` directory, deployed via the `luks-csi-driver/` Helm chart. It provides the same Vault-backed LUKS encryption through the standard Kubernetes PVC interface, without requiring custom resources or privileged workload pods. **For new deployments, the CSI driver is the recommended approach.** See [`csi-driver/README.md`](csi-driver/README.md) for full instructions.
+
 # Prerequisites
 
 - Kubernetes cluster
@@ -15,29 +17,39 @@ The tasks described below focus on automating the lifecycle of encrypted block s
 # Project structure
 
 ```shell
+├── README.md
+├── main.py                          # Kopf operator (Python/kopf framework)
+├── requirements.txt
 ├── Dockerfile
 ├── Dockerfile-storage-tool
-├── README.md
 ├── entrypoint.sh
-├── luks-operator-vault
+├── luks-operator-vault/             # Helm chart for kopf operator
 │   ├── Chart.yaml
-│   ├── charts
-│   ├── custom-resource
+│   ├── values.yaml
+│   ├── custom-resource/
 │   │   └── encrypted-volume-cr-vault.yaml
-│   ├── templates
-│   │   ├── _helpers.tpl
-│   │   ├── crds
-│   │   │   └── crd.yaml
-│   │   ├── deployment.yaml
-│   │   ├── rbac.yaml
-│   │   └── registry-secret.yaml
-│   └── values.yaml
-├── main.py
-├── requirements.txt
-├── scripts
-│   └── k8s-luks-restricted.sh
-└── vault-values
-    └── values.yaml
+│   └── templates/
+│       ├── crds/crd.yaml            # EncryptedVolume CRD
+│       ├── deployment.yaml
+│       ├── rbac.yaml
+│       └── registry-secret.yaml
+├── vault-values/
+│   └── values.yaml                  # Vault HA Helm values
+├── scripts/
+│   └── k8s-luks-restricted.sh       # AppArmor profile deployment (kopf operator)
+├── csi-driver/                      # CSI driver (Python gRPC) — recommended
+│   ├── README.md                    # CSI driver documentation
+│   ├── SECURITY.md                  # Security review for sensitive data workloads
+│   ├── main.py / controller.py / node.py / luks.py / vault.py / k8s.py / driver.py
+│   ├── manifests/                   # Raw Kubernetes manifests
+│   └── proto/csi.proto
+└── luks-csi-driver/                 # Helm chart for CSI driver — recommended
+    ├── Chart.yaml
+    ├── values.yaml
+    └── templates/
+        ├── csidriver.yaml / storageclass.yaml / controller.yaml / node.yaml
+        ├── rbac.yaml / serviceaccounts.yaml
+        └── apparmor-profile.yaml    # AppArmor loader DaemonSet (automatic)
 ```
 
 # Features
@@ -50,10 +62,14 @@ The tasks described below focus on automating the lifecycle of encrypted block s
 
 # Architecture
 
-1. CRD Controller: Watches `EncrytedVolume` custom resource.
+**Kopf Operator:**
+
+1. CRD Controller: Watches `EncryptedVolume` custom resource.
 2. Vault Sync: The Operator kopf timer watches the vault secret version change every 30secs.
 3. Annotation Trigger: Operator patches the vaultVersion annotation when a new vault secret version is found.
-4. Rekey Job: Annotation change triggers a priviledge job (but restricted using the Kubernetes AppAmor profile) that does the vault key rotation running `luksAddKey` and `luksRemoveKey` on the worker node.
+4. Rekey Job: Annotation change triggers a privileged job (restricted using the Kubernetes AppArmor profile) that does the vault key rotation running `luksAddKey` and `luksRemoveKey` on the worker node.
+
+**CSI Driver (recommended):** The `csi-driver/` implements the same lifecycle via the standard Kubernetes CSI interface. A Controller Deployment provisions backing PVCs and auto-generates Vault LUKS keys at `CreateVolume` time. A Node DaemonSet handles `luksFormat`, `luksOpen`, mount, unmount, and `luksClose` via CSI NodeStage/NodeUnstage RPCs. Key rotation applies automatically in `NodeStageVolume` when the Vault version has advanced. Only the node DaemonSet requires privileged access; user workload pods are unprivileged. The AppArmor profile is deployed automatically via a loader DaemonSet — no SSH to worker nodes required.
 
 # Custom Resource
 
@@ -152,7 +168,7 @@ EOF
 
 ## Step 2
 
-2. Install Kubernetes Operator
+2. Install Kubernetes Operator (kopf)
 
 ```bash
 # Create and extract secret
@@ -169,7 +185,27 @@ GET_SECRET=$(kubectl get secret gitlab-regcred-cam -n default  -o jsonpath='{.da
 helm install luks-test-vault . --set imageCredentials.docker ConfigJson=$GET_SECRET
 
 # Create Custom resource
-kubectl apply -f ~/projects/k8s-cinder-luks-operator-config/luks-operator-vault/custom-resource/encrypted-volume-cr-vault.yaml
+kubectl apply -f luks-operator-vault/custom-resource/encrypted-volume-cr-vault.yaml
+```
+
+## Alternative: Deploy the CSI Driver (recommended for new deployments)
+
+See [`csi-driver/README.md`](csi-driver/README.md) for full prerequisites and
+instructions. The Vault role setup in Step 1 above is shared — the only difference is
+that the CSI driver role binds to `luks-csi-controller` and `luks-csi-node` service
+accounts in `kube-system` (not `encrypted-volume-operator` in `default`).
+
+```bash
+# Build the driver image
+docker build -t luks-csi:dev ./csi-driver/
+
+# Deploy via Helm
+helm install luks-csi-driver ./luks-csi-driver/ \
+  --namespace kube-system \
+  --set vault.address="http://vault.default.svc.cluster.local:8200" \
+  --set vault.role="luks-operator-role" \
+  --set storageClass.backingStorageClass="<your-block-storageclass>" \
+  --set storageClass.institution="<your-institution>"
 ```
 
 ## Verification
@@ -236,7 +272,7 @@ To login to the DEV mode use same URL and change method to `Token` and use the `
 
 To be able to initialise, format and rekey the underlying block storage, the helper pods (Init-Containers, Rekey jobs) need their privilege access set to `true`. To mitigate this risk associated with escalated privilege, the following are implemented.
 
-- Restricted AppArmor Profiles: Uses custom AppArmor profiles `k8s-luks-restricted` on all the worker nodes. This profile applies least priviledge to all the privilege containers effectively restricting its execution scope to crypsetup and necessary block-device Sys calls.
+- Restricted AppArmor Profiles: Uses custom AppArmor profiles `k8s-luks-restricted` on all the worker nodes. This profile applies least privilege to all the privilege containers effectively restricting its execution scope to cryptsetup and necessary block-device Sys calls.
 
 - In-Memory Key Handling: To prevent sensitive data leakage of encryption keys, Linux Process Substitution, e.g. echo $KEY, is used to pipe keys directly into the cryptsetup binary from memory so that keys do not persist on the container storage and temporary filesystem.
 
@@ -244,9 +280,9 @@ To be able to initialise, format and rekey the underlying block storage, the hel
 
 - Short-Lived Execution: Rekey job operations are dispatched as ephemeral Kubernetes Jobs so that privileged pods do not persist in the namespace after their tasks are complete.
 
-# Future Improvements
+- Privilege scope reduction (CSI driver): The CSI driver confines privileged access to only the node DaemonSet. User workload pods remain unprivileged, which satisfies Pod Security Admission `restricted` or `baseline` profiles. The AppArmor profile is deployed automatically via a loader DaemonSet — no `scripts/k8s-luks-restricted.sh` SSH step required.
 
-### Use CSI-based encryption.
+See [`csi-driver/SECURITY.md`](csi-driver/SECURITY.md) for a full security review of the CSI driver, including considerations specific to health data and HIPAA/GDPR workloads.
 
 # Useful Links
 
@@ -256,3 +292,6 @@ To be able to initialise, format and rekey the underlying block storage, the hel
 - https://developer.hashicorp.com/vault/docs/deploy/kubernetes/injector
 - https://developer.hashicorp.com/vault/docs/agent-and-proxy/agent/template
 - https://developer.hashicorp.com/vault/docs/secrets/identity/oidc-provider
+- https://github.com/container-storage-interface/spec — CSI specification
+- https://kubernetes-csi.github.io/docs/ — CSI developer documentation
+- [`csi-driver/SECURITY.md`](csi-driver/SECURITY.md) — CSI driver security review
