@@ -7,6 +7,14 @@ particularly in the context of research workloads handling sensitive data
 Findings are grouped by severity. Items marked **Critical** or **High** should
 be addressed before the driver is used with real health data.
 
+> **Note on key management model:** This document was originally written when LUKS keys
+> were stored as Kubernetes Secrets. The current implementation stores keys in
+> HashiCorp Vault (`vault.py`). Findings **C1** (Secrets not encrypted at rest) and
+> **C2** (cluster-wide Secret ClusterRole) describe risks that are mitigated by the
+> Vault backend — LUKS keys are no longer stored in etcd, and the node ClusterRole no
+> longer requires `secrets/get`. The remaining findings (C3 onwards) are
+> architecture-independent and remain relevant regardless of the key backend.
+
 ---
 
 ## Critical
