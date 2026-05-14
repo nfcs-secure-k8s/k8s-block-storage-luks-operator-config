@@ -114,7 +114,31 @@ kubectl exec vault-0 -- vault write auth/kubernetes/role/luks-operator-role \
     policies="luks-policy" \
     ttl="24h"
 
+# Configure OIDC Google . MyAccessID would be updated later
+kubectl exec vault-0 -- vault auth enable oidc
+
+kubectl exec vault-0 -- vault write auth/oidc/config \
+
+kubectl exec vault-0 -- vault write auth/oidc/config \
+    oidc_discovery_url="https://accounts.google.com" \
+    oidc_client_id="<Google-oidc-client-id>" \
+    oidc_client_secret="<Google-oidc-client-secret>" \
+    default_role="researcher-role"
+
+kubectl exec vault-0 -- vault write auth/oidc/role/researcher-role \
+    user_claim="email" \
+    oidc_scopes="openid,email" \
+    allowed_redirect_uris="https://vault.hpc.cam.ac.uk/ui/vault/auth/oidc/oidc/callback,http://localhost:8250/oidc/callback" \
+    policies="luks-policy" \
+    ttl="1h"
+
+
 # policy and role
+
+# create physical storage path
+kubectl exec vault-0 -- vault secrets enable -path=secret kv-v2
+
+
 kubectl exec -i vault-0 -- vault policy write luks-policy - <<EOF
 path "secret/data/tenants/*" {
   capabilities = ["create", "read", "update", "delete", "list"]
