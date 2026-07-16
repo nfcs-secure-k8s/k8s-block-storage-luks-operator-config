@@ -46,7 +46,7 @@ The tasks described below focus on automating the lifecycle of encrypted block s
 - Automated LUKS Provisioning: Automatically encrypts PVC volumes with LUKS
 - Vault Key Management: Integrates with HashiCorp vault using KV-v2 engine for encryption key storage and rotation.
 - Key Rotation: Operator monitors vault key version changes using a background timer, which is triggered on version change for rekeying.
-- Federated Identity: Configured myAccessID for federated access using institutions's id to manage encrypted volume keys. (Not yet implemented)
+- Federated Identity: Configured myAccessID for federated access using institutions's id to manage encrypted volume keys.
 - Ephemeral Rekeying: Uses short-lived jobs with restricted AppAmor profiles to perform key rotations.
 
 # Architecture
