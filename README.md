@@ -11,6 +11,7 @@ The tasks described below focus on automating the lifecycle of encrypted block s
 - Docker
 - kubectl
 - Helm
+- Keycloak
 
 # Project structure
 
@@ -43,7 +44,7 @@ The tasks described below focus on automating the lifecycle of encrypted block s
 # Features
 
 - Automated LUKS Provisioning: Automatically encrypts PVC volumes with LUKS
-- Vault Key Management: Integrates with HashiCorp vault using KV-V2 engine for encryption key storage and rotation.
+- Vault Key Management: Integrates with HashiCorp vault using KV-v2 engine for encryption key storage and rotation.
 - Key Rotation: Operator monitors vault key version changes using a background timer, which is triggered on version change for rekeying.
 - Federated Identity: Configured myAccessID for federated access using institutions's id to manage encrypted volume keys. (Not yet implemented)
 - Ephemeral Rekeying: Uses short-lived jobs with restricted AppAmor profiles to perform key rotations.
@@ -64,7 +65,7 @@ metadata:
   name: luks-encrypted-volume-new
   namespace: default
 spec:
-  institution: "university of cambridge"
+  institution: "university-of-institution-1"
   pvcName: "csi-pvc-cinder-for-luks"
   mountPath: "/mnt/securefolder"
   size: "2Gi"
@@ -76,107 +77,184 @@ spec:
 
 1. Vault Configuration
 
-## Step 1
+## Step 1: Base Host and Vault Initilization
 
-Install, configure vault via helm chart and create vault policy and role.
+1. Install the AppAmor profile in all the cluster worker nodes.
 
 ```bash
 # Install AppAmor profile on the nodes
 chmod u+x  scripts/k8s-luks-restricted.sh
 ./scripts/k8s-luks-restricted.sh
+```
 
+2. Install Vault HA cluster via Helm
 
-# Vault Setup - Install vault HA
+```bash
 helm install vault hashicorp/vault -f vault-values/values.yaml
+```
 
-# Initialize to prepare vault storage to receive data. Save the 5 Unseal keys and initial root token in a secure location
+3. Initialize to prepare vault storage to receive data. Save the 5 Unseal keys and initial root token in a secure location
+
+```bash
 kubectl exec vault-0 -- vault operator init
+```
 
-#Unseal the leader (vault-0) with the unseal command 3 times using different keys. Do same for vault-1 and vault-2
+4. Unseal the leader (vault-0) with the unseal command 3 times using different keys. Do same for vault-1 and vault-2, to establish cluster quorum.
+
+```bash
+# Unseal the Leader
 kubectl exec -it vault-0 -- vault operator unseal
 
+
 # Join the new nodes as peers to the raft cluster
+
 kubectl exec vault-1 -- vault operator raft join http://vault-0.vault-internal:8200
+kubectl exec -it vault-1 -- vault operator unseal
 
-# Login with the root token provided to setup auth methods
+kubectl exec vault-2 -- vault operator raft join http://vault-0.vault-internal:8200
+kubectl exec -it vault-2 -- vault operator unseal
+```
+
+5. Login with the root token provided to setup auth methods
+
+```bash
 kubectl exec -it vault-0 -- vault login <root token>
+```
 
-#enable vault to trust Kubernetes
+## Step 2:Configure Authentication Methods
+
+1. Enable and conffigure the Kubernetes authentication backend
+
+```bash
 kubectl exec vault-0 -- vault auth enable kubernetes
 
 #configure access
 kubectl exec vault-0 -- sh -c 'vault write auth/kubernetes/config \
-    kubernetes_host="https://$KUBERNETES_SERVICE_HOST:$KUBERNETES_SERVICE_PORT"'
+ kubernetes_host="https://$KUBERNETES_SERVICE_HOST:$KUBERNETES_SERVICE_PORT"'
 
 kubectl exec vault-0 -- vault write auth/kubernetes/role/luks-operator-role \
-    bound_service_account_names="encrypted-volume-operator" \
-    bound_service_account_namespaces="default" \
-    policies="luks-policy" \
-    ttl="24h"
+ bound_service_account_names="encrypted-volume-operator" \
+ bound_service_account_namespaces="default" \
+ policies="luks-policy" \
+ ttl="24h"
+```
 
-# Configure OIDC Google . MyAccessID would be updated later
+2. Enable and configure the OpenID connect (OIDC) backened for MyAccessID via Keycloak
+
+```bash
 kubectl exec vault-0 -- vault auth enable oidc
 
 kubectl exec vault-0 -- vault write auth/oidc/config \
+ oidc_discovery_url="https://id.hpc.cam.ac.uk/auth/realms/CSD3" \
+ oidc_client_id="<keycloak-client-id>" \
+ oidc_client_secret="<keycloak-client-secret>" \
+ default_role="researcher-role" \
+ groups_claim="groups" \
+ tls_skip_verify=true
+```
 
-kubectl exec vault-0 -- vault write auth/oidc/config \
-    oidc_discovery_url="https://accounts.google.com" \
-    oidc_client_id="<Google-oidc-client-id>" \
-    oidc_client_secret="<Google-oidc-client-secret>" \
-    default_role="researcher-role"
+## Step 3: Define Policies and Multi-Tenant Identity Entities
 
-kubectl exec vault-0 -- vault write auth/oidc/role/researcher-role \
-    user_claim="email" \
-    oidc_scopes="openid,email" \
-    allowed_redirect_uris="https://vault.hpc.cam.ac.uk/ui/vault/auth/oidc/oidc/callback,http://localhost:8250/oidc/callback" \
-    policies="luks-policy" \
-    ttl="1h"
+1. Enable the persisent Key-Value version 2 secret engine path
 
-
-# policy and role
-
-# create physical storage path
+```bash
 kubectl exec vault-0 -- vault secrets enable -path=secret kv-v2
+```
 
+2. Create local policy configuration files:
 
-kubectl exec -i vault-0 -- vault policy write luks-policy - <<EOF
-path "secret/data/tenants/*" {
-  capabilities = ["create", "read", "update", "delete", "list"]
-}
+```bash
+# Write Cambridge Production Policy
+cat <<EOF > cambridge-production-policy.hcl
+path "secret/data/tenants/cambridge/*" { capabilities = ["create", "read", "update", "delete", "list"] }
+path "secret/metadata/tenants/cambridge/*" { capabilities = ["read", "list", "delete"] }
+path "secret/metadata/tenants/" { capabilities = ["list"] }
+path "secret/metadata/" { capabilities = ["list"] }
+path "sys/internal/ui/mounts/secret" { capabilities = ["read"] }
+path "identity/entity/id/{{identity.entity.id}}" { capabilities = ["read"] }
+path "identity/entity/name/{{identity.entity.name}}" { capabilities = ["read"] }
+path "secret/" { capabilities = ["read"] }
+EOF
 
-path "secret/metadata/tenants/*" {
-  capabilities = ["read", "list", "delete"]
-}
-
-path "secret/metadata/tenants" {
-  capabilities = ["list"]
-}
-
-path "secret/metadata" {
-  capabilities = ["list"]
-}
-
-path "sys/internal/ui/mounts/secret" {
-  capabilities = ["read"]
-}
-
-path "identity/entity/id/{{identity.entity.id}}" {
-  capabilities = ["read"]
-}
-
-path "identity/entity/name/{{identity.entity.name}}" {
-  capabilities = ["read"]
-}
-
-path "identity/entity/id" {
-  capabilities = ["list"]
-}
+# Write Cambridge Testing Policy
+cat <<EOF > cambridge-testing-policy.hcl
+path "secret/data/tenants/cambridge-test/*" { capabilities = ["create", "read", "update", "delete", "list"] }
+path "secret/metadata/tenants/cambridge-test/*" { capabilities = ["read", "list", "delete"] }
+path "secret/metadata/tenants" { capabilities = ["list"] }
+path "secret/metadata" { capabilities = ["list"] }
+path "sys/internal/ui/mounts/secret" { capabilities = ["read"] }
 EOF
 ```
 
-## Step 2
+3. Apply the tenant policies to Vault
 
-2. Install Kubernetes Operator
+```bash
+cat cambridge-production-policy.hcl | kubectl exec -i vault-0 -- vault policy write cambridge-production-policy -
+cat cambridge-testing-policy.hcl | kubectl exec -i vault-0 -- vault policy write cambridge-testing-policy -
+```
+
+4. Create the core Operator Policy (luks-policy)
+
+```bash
+kubectl exec -i vault-0 -- vault policy write luks-policy - <<EOF
+path "secret/data/tenants/*" { capabilities = ["create", "read", "update", "delete", "list"] }
+path "secret/metadata/tenants/*" { capabilities = ["read", "list", "delete"] }
+path "secret/metadata/tenants" { capabilities = ["list"] }
+path "secret/metadata" { capabilities = ["list"] }
+path "sys/internal/ui/mounts/secret" { capabilities = ["read"] }
+path "identity/entity/id/{{identity.entity.id}}" { capabilities = ["read"] }
+path "identity/entity/name/{{identity.entity.name}}" { capabilities = ["read"] }
+path "identity/entity/id" { capabilities = ["list"] }
+EOF
+```
+
+5. Provision external identity Groups and bind them to MyAccessID claim Group-Aliases
+
+```bash
+# Create Vault Groups
+kubectl exec vault-0 -- vault write identity/group name="cambridge-production" type="external" policies="cambridge-production-policy"
+kubectl exec vault-0 -- vault write identity/group name="cambridge-testing" type="external" policies="cambridge-testing-policy"
+
+# Capture OIDC Engine Accessor
+export OIDC_ACCESSOR=$(kubectl exec vault-0 -- vault auth list -format=json | jq -r '."oidc/".accessor')
+
+# Map MyAccessID Core Admins Group
+export CAMBRIDGE_PROD_GROUP_ID=$(kubectl exec vault-0 -- vault read -format=json identity/group/name/cambridge-production | jq -r ".data.id")
+kubectl exec vault-0 -- vault write identity/group-alias name="enno3-admins" \
+    mount_accessor="$OIDC_ACCESSOR" \
+    canonical_id="$CAMBRIDGE_PROD_GROUP_ID"
+
+# Map MyAccessID Dedicated Testing Group
+export CAMBRIDGE_TEST_GROUP_ID=$(kubectl exec vault-0 -- vault read -format=json identity/group/name/cambridge-testing | jq -r ".data.id")
+kubectl exec vault-0 -- vault write identity/group-alias name="Test-ENNO-Cambridge" \
+    mount_accessor="$OIDC_ACCESSOR" \
+    canonical_id="$CAMBRIDGE_TEST_GROUP_ID"
+```
+
+6. Finalize OIDC role mappings
+
+```bash
+# Create Vault Groups
+kubectl exec vault-0 -- vault write identity/group name="cambridge-production" type="external" policies="cambridge-production-policy"
+kubectl exec vault-0 -- vault write identity/group name="cambridge-testing" type="external" policies="cambridge-testing-policy"
+
+# Capture OIDC Engine Accessor
+export OIDC_ACCESSOR=$(kubectl exec vault-0 -- vault auth list -format=json | jq -r '."oidc/".accessor')
+
+# Map MyAccessID Core Admins Group
+export CAMBRIDGE_PROD_GROUP_ID=$(kubectl exec vault-0 -- vault read -format=json identity/group/name/cambridge-production | jq -r ".data.id")
+kubectl exec vault-0 -- vault write identity/group-alias name="enno3-admins" \
+    mount_accessor="$OIDC_ACCESSOR" \
+    canonical_id="$CAMBRIDGE_PROD_GROUP_ID"
+
+# Map MyAccessID Dedicated Testing Group
+export CAMBRIDGE_TEST_GROUP_ID=$(kubectl exec vault-0 -- vault read -format=json identity/group/name/cambridge-testing | jq -r ".data.id")
+kubectl exec vault-0 -- vault write identity/group-alias name="Test-ENNO-Cambridge" \
+    mount_accessor="$OIDC_ACCESSOR" \
+    canonical_id="$CAMBRIDGE_TEST_GROUP_ID"
+```
+
+## Step 4: Install Kubernetes Operator
 
 ```bash
 # Create and extract secret
