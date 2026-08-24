@@ -85,6 +85,7 @@ data:
       /mnt/shared/** rw,
 
       mount fstype=ext4,
+      mount options=(rw, move),
       umount,
 
       deny /etc/shadow w,
