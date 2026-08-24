@@ -74,8 +74,7 @@ def get_vault_client(logger):
     # inject token from servioce account
     with open('/var/run/secrets/kubernetes.io/serviceaccount/token', 'r') as f:
         jwt = f.read()
-        logger.info(f"check jwt: {jwt}")
-    
+
     client = hvac.Client(url=os.environ.get('VAULT_ADDR', 'http://vault.default:8200'))
     client.auth.kubernetes.login(
         role=os.environ.get('VAULT_ROLE', 'luks-operator-role'),
@@ -125,7 +124,6 @@ def ensure_vault_secret(path: str, logger):
     except hvac.exceptions.InvalidPath:
         logger.info(f"Key missing at {path}. Generating new LUKS key...")
         new_key = secrets.token_hex(32)
-        logger.info(f"check new_key: {new_key}")
         create_response = client.secrets.kv.v2.create_or_update_secret(
             mount_point=mount_point,
             path=secret_path,
@@ -505,7 +503,7 @@ def rotate_luks_key(spec, status, name, namespace, logger, body, new, **kwargs):
                             "privileged": True,
                             "appArmorProfile": {"type": "Localhost", "localhostProfile": "k8s-luks-restricted"}
                         },
-                        "command": ["sh", "-c"],
+                        "command": ["bash", "-c"],
                         "args": [f"""
                             set -eux
                             DEV="/dev/encrypted-block"

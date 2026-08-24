@@ -3,3 +3,5 @@ luks.key
 *.gz
 README-old.md
 keep.md
+CLAUDE.md
+.claude/
