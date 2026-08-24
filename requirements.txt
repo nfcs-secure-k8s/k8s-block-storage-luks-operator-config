@@ -1,3 +1,5 @@
 kopf==1.36
-kubernetes
+# kubernetes>=36.0.1 breaks kopf==1.36's login (kopf reads a client attribute
+# removed upstream: https://github.com/nolar/kopf/issues/1307, fixed in kopf 1.44.6)
+kubernetes==35.0.0
 hvac

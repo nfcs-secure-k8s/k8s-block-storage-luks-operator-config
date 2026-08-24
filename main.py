@@ -214,7 +214,8 @@ def handle_volume_creation(spec, name, namespace, logger, body, **kwargs):
             "initContainers": [
                 {
                     "name": "luks-setup",
-                    "image": "registry.gitlab.developers.cam.ac.uk/rcs/platforms/cloud-services/k8s-cinder-luks-operator-config:luks-storage-tool-v1",
+                    # "image": "registry.gitlab.developers.cam.ac.uk/rcs/platforms/cloud-services/k8s-cinder-luks-operator-config:luks-storage-tool-v1",
+                    "image": "ghcr.io/thinkc/luks-storage-tool:latest",
                     "env": [{"name": "CRYPTSETUP_UDEV_SYNC_DISABLE", "value": "1"}],
                     "securityContext": {
                         "privileged": True,
@@ -395,7 +396,8 @@ def spawn_janitor_job(api, name, namespace, node_name):
                     ],  
                     "containers": [{
                         "name": "cleanup",
-                        "image": "registry.gitlab.developers.cam.ac.uk/rcs/platforms/cloud-services/k8s-cinder-luks-operator-config:luks-storage-tool-v1",
+                        # "image": "registry.gitlab.developers.cam.ac.uk/rcs/platforms/cloud-services/k8s-cinder-luks-operator-config:luks-storage-tool-v1",
+                        "image": "ghcr.io/thinkc/luks-storage-tool:latest",
                         "securityContext": {
                             "privileged": True,
                             "appArmorProfile": {
@@ -498,7 +500,8 @@ def rotate_luks_key(spec, status, name, namespace, logger, body, new, **kwargs):
                     "restartPolicy": "Never",
                     "containers": [{
                         "name": "rekey",
-                        "image": "registry.gitlab.developers.cam.ac.uk/rcs/platforms/cloud-services/k8s-cinder-luks-operator-config:luks-storage-tool-v1",
+                        # "image": "registry.gitlab.developers.cam.ac.uk/rcs/platforms/cloud-services/k8s-cinder-luks-operator-config:luks-storage-tool-v1",
+                        "image": "ghcr.io/thinkc/luks-storage-tool:latest",
                         "securityContext": {
                             "privileged": True,
                             "appArmorProfile": {"type": "Localhost", "localhostProfile": "k8s-luks-restricted"}

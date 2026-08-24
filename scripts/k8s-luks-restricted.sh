@@ -1,4 +1,9 @@
 #!/bin/bash
+# DEPRECATED: replaced by the apparmor.enabled DaemonSet in luks-operator-vault
+# (templates/apparmor-profile.yaml + templates/apparmor-installer.yaml). That
+# DaemonSet installs and reloads this same profile on every node automatically,
+# including nodes added after initial setup, without requiring SSH access.
+# See .claude/docs/05-apparmor-daemonset.md. Kept only for manual/offline use.
 set -euo pipefail
 
 PROFILE_NAME="K8s-luks-restricted"
@@ -98,6 +103,7 @@ profile k8s-luks-restricted flags=(attach_disconnected) {
   /mnt/shared/** rw,
 
   mount fstype=ext4,
+  mount options=(rw, move),
   umount,
 
   # 8. HARD DENIALS

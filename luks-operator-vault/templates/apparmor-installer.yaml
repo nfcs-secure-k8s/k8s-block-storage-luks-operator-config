@@ -1,0 +1,75 @@
+{{- if .Values.apparmor.enabled }}
+apiVersion: apps/v1
+kind: DaemonSet
+metadata:
+  name: {{ include "luks-operator-vault.fullname" . }}-apparmor-installer
+  labels:
+    {{- include "luks-operator-vault.labels" . | nindent 4 }}
+spec:
+  selector:
+    matchLabels:
+      app: luks-apparmor-installer
+  template:
+    metadata:
+      labels:
+        app: luks-apparmor-installer
+    spec:
+      hostPID: false
+      hostNetwork: false
+      # Privileged installer pod: keep it off the control-plane node, which
+      # does not run privileged LUKS storage workloads.
+      affinity:
+        nodeAffinity:
+          requiredDuringSchedulingIgnoredDuringExecution:
+            nodeSelectorTerms:
+              - matchExpressions:
+                  - key: node-role.kubernetes.io/control-plane
+                    operator: DoesNotExist
+      tolerations:
+        - operator: Exists   # still run on tainted worker nodes (e.g. dedicated storage/TRE nodes)
+      initContainers:
+        - name: install-profile
+          image: ubuntu:24.04
+          command:
+            - sh
+            - -c
+            - |
+              set -eux
+              # apparmor_parser is not present in the base ubuntu image by default
+              apt-get update
+              apt-get install -y --no-install-recommends apparmor
+              cp /profiles/k8s-luks-restricted /host/etc/apparmor.d/k8s-luks-restricted
+              apparmor_parser -r /host/etc/apparmor.d/k8s-luks-restricted
+              echo "AppArmor profile installed successfully"
+          securityContext:
+            privileged: true   # required for apparmor_parser
+          volumeMounts:
+            - name: profile-configmap
+              mountPath: /profiles
+            - name: host-etc-apparmor
+              mountPath: /host/etc/apparmor.d
+            - name: sys-kernel-security
+              mountPath: /sys/kernel/security
+      containers:
+        - name: pause
+          image: registry.k8s.io/pause:3.9
+          resources:
+            requests:
+              cpu: "1m"
+              memory: "8Mi"
+            limits:
+              cpu: "10m"
+              memory: "16Mi"
+      volumes:
+        - name: profile-configmap
+          configMap:
+            name: {{ include "luks-operator-vault.fullname" . }}-apparmor-profile
+        - name: host-etc-apparmor
+          hostPath:
+            path: /etc/apparmor.d
+            type: DirectoryOrCreate
+        - name: sys-kernel-security
+          hostPath:
+            path: /sys/kernel/security
+            type: Directory
+{{- end }}

@@ -22,3 +22,7 @@ vault:
   role: "luks-operator-role"
   mountPath: "secret"
   kvPath: "luks-keys"
+
+apparmor:
+  enabled: true
+  # Set to false on SELinux-only nodes (RHEL/Fedora) where AppArmor is unavailable
