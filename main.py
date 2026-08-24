@@ -74,8 +74,7 @@ def get_vault_client(logger):
     # inject token from servioce account
     with open('/var/run/secrets/kubernetes.io/serviceaccount/token', 'r') as f:
         jwt = f.read()
-        logger.info(f"check jwt: {jwt}")
-    
+
     client = hvac.Client(url=os.environ.get('VAULT_ADDR', 'http://vault.default:8200'))
     client.auth.kubernetes.login(
         role=os.environ.get('VAULT_ROLE', 'luks-operator-role'),
@@ -125,7 +124,6 @@ def ensure_vault_secret(path: str, logger):
     except hvac.exceptions.InvalidPath:
         logger.info(f"Key missing at {path}. Generating new LUKS key...")
         new_key = secrets.token_hex(32)
-        logger.info(f"check new_key: {new_key}")
         create_response = client.secrets.kv.v2.create_or_update_secret(
             mount_point=mount_point,
             path=secret_path,
@@ -216,7 +214,8 @@ def handle_volume_creation(spec, name, namespace, logger, body, **kwargs):
             "initContainers": [
                 {
                     "name": "luks-setup",
-                    "image": "registry.gitlab.developers.cam.ac.uk/rcs/platforms/cloud-services/k8s-cinder-luks-operator-config:luks-storage-tool-v1",
+                    # "image": "registry.gitlab.developers.cam.ac.uk/rcs/platforms/cloud-services/k8s-cinder-luks-operator-config:luks-storage-tool-v1",
+                    "image": "ghcr.io/thinkc/luks-storage-tool:latest",
                     "env": [{"name": "CRYPTSETUP_UDEV_SYNC_DISABLE", "value": "1"}],
                     "securityContext": {
                         "privileged": True,
@@ -397,7 +396,8 @@ def spawn_janitor_job(api, name, namespace, node_name):
                     ],  
                     "containers": [{
                         "name": "cleanup",
-                        "image": "registry.gitlab.developers.cam.ac.uk/rcs/platforms/cloud-services/k8s-cinder-luks-operator-config:luks-storage-tool-v1",
+                        # "image": "registry.gitlab.developers.cam.ac.uk/rcs/platforms/cloud-services/k8s-cinder-luks-operator-config:luks-storage-tool-v1",
+                        "image": "ghcr.io/thinkc/luks-storage-tool:latest",
                         "securityContext": {
                             "privileged": True,
                             "appArmorProfile": {
@@ -500,12 +500,13 @@ def rotate_luks_key(spec, status, name, namespace, logger, body, new, **kwargs):
                     "restartPolicy": "Never",
                     "containers": [{
                         "name": "rekey",
-                        "image": "registry.gitlab.developers.cam.ac.uk/rcs/platforms/cloud-services/k8s-cinder-luks-operator-config:luks-storage-tool-v1",
+                        # "image": "registry.gitlab.developers.cam.ac.uk/rcs/platforms/cloud-services/k8s-cinder-luks-operator-config:luks-storage-tool-v1",
+                        "image": "ghcr.io/thinkc/luks-storage-tool:latest",
                         "securityContext": {
                             "privileged": True,
                             "appArmorProfile": {"type": "Localhost", "localhostProfile": "k8s-luks-restricted"}
                         },
-                        "command": ["sh", "-c"],
+                        "command": ["bash", "-c"],
                         "args": [f"""
                             set -eux
                             DEV="/dev/encrypted-block"
