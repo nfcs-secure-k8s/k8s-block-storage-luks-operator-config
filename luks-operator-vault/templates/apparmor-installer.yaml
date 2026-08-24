@@ -48,6 +48,8 @@ spec:
               mountPath: /profiles
             - name: host-etc-apparmor
               mountPath: /host/etc/apparmor.d
+            - name: sys-kernel-security
+              mountPath: /sys/kernel/security
       containers:
         - name: pause
           image: registry.k8s.io/pause:3.9
@@ -66,4 +68,8 @@ spec:
           hostPath:
             path: /etc/apparmor.d
             type: DirectoryOrCreate
+        - name: sys-kernel-security
+          hostPath:
+            path: /sys/kernel/security
+            type: Directory
 {{- end }}
