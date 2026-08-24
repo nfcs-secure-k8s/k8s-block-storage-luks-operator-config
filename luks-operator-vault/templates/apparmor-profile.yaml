@@ -1,0 +1,94 @@
+{{- if .Values.apparmor.enabled }}
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "luks-operator-vault.fullname" . }}-apparmor-profile
+  labels:
+    {{- include "luks-operator-vault.labels" . | nindent 4 }}
+data:
+  k8s-luks-restricted: |
+    # AppArmor profile for LUKS privileged containers
+    include <tunables/global>
+
+    profile k8s-luks-restricted flags=(attach_disconnected) {
+      include <abstractions/base>
+      include <abstractions/nameservice>
+
+      /bin/sh ix,
+      /bin/busybox ix,
+      /sbin/apk ix,
+      /{usr/,}sbin/cryptsetup ix,
+      /{usr/,}bin/nsenter ix,
+      /{usr/,}bin/lsblk ix,
+      /{usr/,}bin/findmnt ix,
+      /{usr/,}sbin/dmsetup ix,
+      /{usr/,}bin/fuser ix,
+      /{usr/,}bin/umount ix,
+      /{usr/,}bin/mount ix,
+      /{usr/,}bin/tr ix,
+      /{usr/,}bin/awk ix,
+      /{usr/,}bin/grep ix,
+      /{usr/,}bin/sleep ix,
+      /{usr/,}bin/mkdir ix,
+      /{usr/,}sbin/mkfs.ext4 ix,
+      /{usr/,}sbin/mke2fs ix,
+      /{usr/,}bin/chown ix,
+      /{usr/,}bin/chmod ix,
+
+      capability chown,
+      capability fowner,
+      capability fsetid,
+      capability dac_override,
+      capability dac_read_search,
+      capability sys_chroot,
+      capability sys_admin,
+      capability sys_resource,
+      capability ipc_lock,
+      capability sys_ptrace,
+      capability sys_nice,
+      capability mknod,
+
+      ptrace (read, trace) peer=unconfined,
+      network alg,
+      network unix,
+
+      /dev/vd* rwmk,
+      /dev/sd* rwmk,
+      /dev/dm-* rwmk,
+      /dev/mapper/* rwmk,
+      /dev/mapper/control rwmk,
+      /dev/encrypted-block rwmk,
+      /dev/urandom r,
+      /dev/random r,
+
+      / r,
+      /etc/mke2fs.conf r,
+      /etc/ssl/openssl.cnf r,
+      /proc/crypto r,
+      /proc/devices r,
+      @{PROC}/self/mountinfo r,
+      @{PROC}/[0-9]*/mountinfo r,
+      /sys/dev/block/** r,
+      /sys/devices/** r,
+      /sys/block/** r,
+      /sys/fs/ r,
+
+      /run/ r,
+      /run/mount/ rw,
+      /run/mount/** rw,
+      /run/cryptsetup/ rwk,
+      /run/cryptsetup/** rwk,
+
+      /vault/secrets/ r,
+      /vault/secrets/** r,
+      /mnt/shared/ rw,
+      /mnt/shared/** rw,
+
+      mount fstype=ext4,
+      umount,
+
+      deny /etc/shadow w,
+      deny /root/** w,
+      deny /sys/firmware/** rw,
+    }
+{{- end }}
