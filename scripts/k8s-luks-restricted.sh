@@ -103,6 +103,7 @@ profile k8s-luks-restricted flags=(attach_disconnected) {
   /mnt/shared/** rw,
 
   mount fstype=ext4,
+  mount options=(rw, move),
   umount,
 
   # 8. HARD DENIALS
