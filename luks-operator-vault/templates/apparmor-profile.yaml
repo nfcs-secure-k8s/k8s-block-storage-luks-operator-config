@@ -81,6 +81,8 @@ data:
 
       /vault/secrets/ r,
       /vault/secrets/** r,
+      /keys/ r,
+      /keys/** r,
       /mnt/shared/ rw,
       /mnt/shared/** rw,
 
