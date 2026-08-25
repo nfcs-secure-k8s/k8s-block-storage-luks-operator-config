@@ -99,6 +99,8 @@ profile k8s-luks-restricted flags=(attach_disconnected) {
   # 7. VAULT & MOUNT POINTS
   /vault/secrets/ r,
   /vault/secrets/** r,
+  /keys/ r,
+  /keys/** r,
   /mnt/shared/ rw,
   /mnt/shared/** rw,
 
