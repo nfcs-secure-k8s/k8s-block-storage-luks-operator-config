@@ -490,6 +490,7 @@ def rotate_luks_key(spec, status, name, namespace, logger, body, new, **kwargs):
 
     #create job manifest
     job_name = f"rekey-{name}-v{new_version}"
+    secret_name = f"{job_name}-keys"
     rekey_manifest = {
         "metadata": {"name": job_name},
         "spec": {
@@ -510,15 +511,17 @@ def rotate_luks_key(spec, status, name, namespace, logger, body, new, **kwargs):
                         "args": [f"""
                             set -eux
                             DEV="/dev/encrypted-block"
-                            echo -n '{new_key}' | cryptsetup luksAddKey "$DEV" --key-file <(echo -n '{old_key}') --batch-mode
-                            echo -n '{old_key}' | cryptsetup luksRemoveKey "$DEV" --batch-mode
+                            cryptsetup luksAddKey "$DEV" /keys/new-key --key-file /keys/old-key --batch-mode
+                            cryptsetup luksRemoveKey "$DEV" /keys/old-key --batch-mode
                             echo "Key rotation to v{new_version} complete."
                         """],
-                        "volumeDevices": [{"devicePath": "/dev/encrypted-block", "name": "block-pvc"}]
+                        "volumeDevices": [{"devicePath": "/dev/encrypted-block", "name": "block-pvc"}],
+                        "volumeMounts": [{"name": "rekey-keys", "mountPath": "/keys", "readOnly": True}]
                     }],
                     "volumes": [
                         {"name": "block-pvc", "persistentVolumeClaim": {"claimName": pvc_name}},
-                        {"name": "host-dev", "hostPath": {"path": "/dev"}}
+                        {"name": "host-dev", "hostPath": {"path": "/dev"}},
+                        {"name": "rekey-keys", "secret": {"secretName": secret_name, "defaultMode": 0o400}}
                     ]
                 }
             }
@@ -527,21 +530,44 @@ def rotate_luks_key(spec, status, name, namespace, logger, body, new, **kwargs):
 
     # check or create the job
     batch_api = kubernetes.client.BatchV1Api()
+    v1 = kubernetes.client.CoreV1Api()
     try:
         job = batch_api.read_namespaced_job(name=job_name, namespace=namespace)
-        
+
         if not job.status.succeeded:
             if job.status.failed and job.status.failed > 0:
                 logger.error(f"Rekey Job {job_name} failed.")
                 raise kopf.PermanentError(f"Rekey Job failed for v{new_version}")
-           
+
             raise kopf.TemporaryError(f"Waiting for Job {job_name} to finish...", delay=10)
-           
+
         logger.info(f"Job {job_name} succeeded!")
 
     except kubernetes.client.exceptions.ApiException as e:
         if e.status == 404:
-            batch_api.create_namespaced_job(namespace=namespace, body=rekey_manifest)
+            # Keys never touch the Job manifest/command args (CRITICAL-3): they're
+            # passed via a short-lived Secret, mounted as files, and garbage-collected
+            # by Kubernetes when the Job is deleted (ownerReference below).
+            secret_manifest = {
+                "metadata": {"name": secret_name},
+                "type": "Opaque",
+                "stringData": {"old-key": old_key, "new-key": new_key},
+            }
+            try:
+                v1.create_namespaced_secret(namespace=namespace, body=secret_manifest)
+            except kubernetes.client.exceptions.ApiException as se:
+                if se.status != 409:
+                    raise
+
+            created_job = batch_api.create_namespaced_job(namespace=namespace, body=rekey_manifest)
+            v1.patch_namespaced_secret(name=secret_name, namespace=namespace, body={
+                "metadata": {"ownerReferences": [{
+                    "apiVersion": "batch/v1",
+                    "kind": "Job",
+                    "name": job_name,
+                    "uid": created_job.metadata.uid,
+                }]}
+            })
             raise kopf.TemporaryError(f"Dispatched Rekey Job {job_name}", delay=10)
         else:
             raise
