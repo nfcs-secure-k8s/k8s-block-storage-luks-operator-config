@@ -1,7 +1,7 @@
 server:
   ha:
     enabled: true
-    apiAddr: "https://128.232.226.151.sslip.io" # change this
+    apiAddr: "https://vault.128.232.226.174.sslip.io" # change this
     raft:
       enabled: true
       setNodeId: true
@@ -29,7 +29,7 @@ server:
       cert-manager.io/cluster-issuer: "letsencrypt-staging" # change this
       nginx.ingress.kubernetes.io/backend-protocol: "HTTP"
     hosts:
-      - host: 128.232.226.151.sslip.io # change this
+      - host: vault.128.232.226.174.sslip.io # change this
     tls:
       - secretName: sslip-tls-secret # change this
-        hosts: [128.232.226.151.sslip.io] # change this
+        hosts: [vault.128.232.226.174.sslip.io] # change this
