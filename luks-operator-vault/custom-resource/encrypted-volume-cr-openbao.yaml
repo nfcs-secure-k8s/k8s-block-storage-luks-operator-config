@@ -1,0 +1,12 @@
+apiVersion: crypto.example.com/v1
+kind: EncryptedVolume
+metadata:
+  name: luks-encrypted-volume-openbao-test
+  namespace: luks-system-openbao
+spec:
+  institution: "test-institution"
+  pvcName: "csi-pvc-cinder-for-luks-openbao"
+  mountPath: "/mnt/securefolder"
+  size: "2Gi"
+  deletionPolicy: "Delete"
+  storageClassName: "csi-cinder-sc-delete"
