@@ -8,7 +8,7 @@ server:
     enabled: true
     ingressClassName: nginx
     annotations:
-      cert-manager.io/cluster-issuer: "letsencrypt-staging" # switch to letsencrypt-prod once confirmed working
+      cert-manager.io/cluster-issuer: "letsencrypt-prod" # switched once the full lifecycle test confirmed working (2026-08-26)
       nginx.ingress.kubernetes.io/backend-protocol: "HTTP"
     hosts:
       - host: openbao.128.232.226.174.sslip.io
