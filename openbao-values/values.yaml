@@ -1,0 +1,20 @@
+server:
+  dataStorage:
+    enabled: true
+    size: 5Gi
+    storageClass: "csi-cinder-sc-delete"
+
+  ingress:
+    enabled: true
+    ingressClassName: nginx
+    annotations:
+      cert-manager.io/cluster-issuer: "letsencrypt-staging" # switch to letsencrypt-prod once confirmed working
+      nginx.ingress.kubernetes.io/backend-protocol: "HTTP"
+    hosts:
+      - host: openbao.128.232.226.174.sslip.io
+    tls:
+      - secretName: openbao-sslip-tls-secret
+        hosts: [openbao.128.232.226.174.sslip.io]
+
+# injector.enabled defaults to global.enabled (true) — the Agent Injector is the
+# whole point of this test, left on the chart default intentionally.
