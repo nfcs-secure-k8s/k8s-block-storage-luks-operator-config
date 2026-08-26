@@ -1,0 +1,24 @@
+image:
+  repository: ghcr.io/thinkc/luks-operator
+  tag: latest
+
+operator:
+  namespace: "luks-system-openbao"    # separate namespace from the Vault-backed operator (luks-system)
+
+serviceAccount:
+  create: true
+  name: encrypted-volume-operator
+
+imagePullSecrets:
+  - name: ghcr-regcred   # GHCR packages are public; kubelet falls back to anonymous pull if this Secret doesn't exist
+
+imageCredentials:
+  enabled: false
+
+vault:
+  address: "http://openbao.openbao.svc.cluster.local:8200"
+  role: "luks-operator-role"
+  mountPath: "secret"
+
+apparmor:
+  enabled: false   # profile+DaemonSet already installed cluster-wide by the luks-system release; avoid a duplicate privileged DaemonSet
